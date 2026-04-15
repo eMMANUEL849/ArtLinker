@@ -12,6 +12,7 @@
       "supportsTablet": true
     },
     "android": {
+      "package": "com.emmanuel849.artlinker",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -48,8 +49,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "b48fe296-a1bb-4809-a283-78f69fd4b461"
+        "projectId": "9dec5366-0f57-43dd-aa6d-97765ea87c6c"
       }
-    }
+    },
+    "owner": "zoidart133"
   }
 }
