@@ -11,15 +11,15 @@ export default function AdminLayout() {
         tabBarStyle: {
           height: 70,
           paddingTop: 8,
-          paddingBottom: 12,
+          paddingBottom: 10,
           backgroundColor: "#ffffff",
           borderTopWidth: 0.5,
           borderTopColor: "#e5e7eb",
         },
         tabBarLabelStyle: {
-          fontSize: 11,
+          fontSize: 12,
           fontWeight: "600",
-          marginTop: 2,
+          marginTop: 1,
         },
       }}
     >
@@ -52,14 +52,43 @@ export default function AdminLayout() {
           ),
         }}
       />
-
+      <Tabs.Screen
+        name="reports"
+        options={{
+          title: "Reports",
+          tabBarIcon: ({ color, size }) => (
+            <Ionicons name="bar-chart-outline" size={size} color={color} />
+          ),
+        }}
+      />
+<Tabs.Screen
+        name="transactions"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="analytics"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="jobs_management"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="notifications"
+        options={{
+          href: null,
+        }}
+      />
       <Tabs.Screen
         name="profiles"
         options={{
-          title: "Profiles",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="person-outline" size={size} color={color} />
-          ),
+          href: null,
         }}
       />
 
