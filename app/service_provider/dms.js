@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -15,6 +15,7 @@ import {
   FlatList,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
@@ -511,7 +512,7 @@ export default function ServiceProviderDmsScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F6F8FC" />
 
       <KeyboardAvoidingView

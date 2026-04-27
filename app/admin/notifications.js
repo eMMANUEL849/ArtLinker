@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -13,7 +13,8 @@ import {
   Modal,
   Pressable,
 } from "react-native";
-import { Ionicons, Feather } from "@expo/vector-icons";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   collection,
   onSnapshot,
@@ -99,8 +100,9 @@ const EMPTY_FORM = {
 
 export default function AdminNotificationsScreen() {
   const [users, setUsers] = useState([]);
-  const [announcements, setAnnouncements] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [allNotifications, setAllNotifications] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const [sending, setSending] = useState(false);
 
   const [form, setForm] = useState(EMPTY_FORM);
@@ -119,32 +121,34 @@ export default function AdminNotificationsScreen() {
             ...item.data(),
           }))
         );
-        setLoading(false);
+        setUsersLoading(false);
       },
       (error) => {
         console.log("users error:", error);
         setUsers([]);
-        setLoading(false);
+        setUsersLoading(false);
       }
     );
     unsubscribers.push(unsubUsers);
 
-    const unsubAnnouncements = onSnapshot(
-      query(collection(db, "announcements"), orderBy("createdAt", "desc")),
+    const unsubNotifications = onSnapshot(
+      query(collection(db, "notifications"), orderBy("createdAt", "desc")),
       (snapshot) => {
-        setAnnouncements(
+        setAllNotifications(
           snapshot.docs.map((item) => ({
             id: item.id,
             ...item.data(),
           }))
         );
+        setHistoryLoading(false);
       },
       (error) => {
-        console.log("announcements error:", error);
-        setAnnouncements([]);
+        console.log("notifications error:", error);
+        setAllNotifications([]);
+        setHistoryLoading(false);
       }
     );
-    unsubscribers.push(unsubAnnouncements);
+    unsubscribers.push(unsubNotifications);
 
     return () => {
       unsubscribers.forEach((unsubscribe) => {
@@ -154,6 +158,8 @@ export default function AdminNotificationsScreen() {
       });
     };
   }, []);
+
+  const loading = usersLoading || historyLoading;
 
   const providerUsers = useMemo(() => {
     return users.filter((user) => getUserRole(user) === "service_provider");
@@ -171,23 +177,6 @@ export default function AdminNotificationsScreen() {
     return users.find((user) => user.id === form.selectedUserId) || null;
   }, [users, form.selectedUserId]);
 
-  const historySummary = useMemo(() => {
-    return {
-      total: announcements.length,
-      all: announcements.filter((item) => item?.audience === "all").length,
-      providers: announcements.filter((item) => item?.audience === "providers").length,
-      users: announcements.filter((item) => item?.audience === "users").length,
-      alerts: announcements.filter((item) => item?.type === "platform_alert").length,
-    };
-  }, [announcements]);
-
-  const filteredAnnouncements = useMemo(() => {
-    if (historyFilter === "all") return announcements;
-    return announcements.filter(
-      (item) => item?.audience === historyFilter || item?.type === historyFilter
-    );
-  }, [announcements, historyFilter]);
-
   const targetUsers = useMemo(() => {
     if (form.audience === "all") return users;
     if (form.audience === "users") return normalUsers;
@@ -198,6 +187,71 @@ export default function AdminNotificationsScreen() {
     }
     return [];
   }, [form.audience, form.selectedUserId, users, normalUsers, providerUsers, adminUsers]);
+
+  const myRawAdminNotifications = useMemo(() => {
+    const currentUid = auth.currentUser?.uid;
+    if (!currentUid) return [];
+
+    return allNotifications.filter(
+      (item) => item?.isAdminNotification === true && item?.createdBy === currentUid
+    );
+  }, [allNotifications]);
+
+  const groupedHistory = useMemo(() => {
+    const groups = new Map();
+
+    myRawAdminNotifications.forEach((item) => {
+      const key = item?.sendGroupId || item?.id;
+
+      if (!groups.has(key)) {
+        groups.set(key, {
+          id: key,
+          sendGroupId: key,
+          title: item?.title || "Untitled Notification",
+          message: item?.message || "",
+          type: item?.type || "announcement",
+          audience: item?.audience || "all",
+          createdAt: item?.createdAt || null,
+          createdBy: item?.createdBy || null,
+          recipientCount: 0,
+          recipients: [],
+        });
+      }
+
+      const group = groups.get(key);
+      group.recipientCount += 1;
+
+      if (item?.recipientName) {
+        group.recipients.push({
+          name: item.recipientName,
+          role: item?.recipientRole || "user",
+        });
+      }
+    });
+
+    return Array.from(groups.values()).sort((a, b) => {
+      const aTime = toDate(a.createdAt)?.getTime() || 0;
+      const bTime = toDate(b.createdAt)?.getTime() || 0;
+      return bTime - aTime;
+    });
+  }, [myRawAdminNotifications]);
+
+  const historySummary = useMemo(() => {
+    return {
+      total: groupedHistory.length,
+      all: groupedHistory.filter((item) => item?.audience === "all").length,
+      providers: groupedHistory.filter((item) => item?.audience === "providers").length,
+      users: groupedHistory.filter((item) => item?.audience === "users").length,
+      alerts: groupedHistory.filter((item) => item?.type === "platform_alert").length,
+    };
+  }, [groupedHistory]);
+
+  const filteredAnnouncements = useMemo(() => {
+    if (historyFilter === "all") return groupedHistory;
+    return groupedHistory.filter(
+      (item) => item?.audience === historyFilter || item?.type === historyFilter
+    );
+  }, [groupedHistory, historyFilter]);
 
   const handleChange = (key, value) => {
     setForm((prev) => ({
@@ -238,45 +292,32 @@ export default function AdminNotificationsScreen() {
       setSending(true);
 
       const createdBy = auth.currentUser.uid;
-
-      console.log("CURRENT UID:", auth.currentUser?.uid);
-      console.log("TARGET USERS:", targetUsers.length);
-      console.log("FORM TYPE:", form.type);
-      console.log("FORM AUDIENCE:", form.audience);
-
-      const announcementRef = doc(collection(db, "announcements"));
       const batch = writeBatch(db);
-
-      batch.set(announcementRef, {
-        title,
-        message,
-        type: form.type || "announcement",
-        audience: form.audience || "all",
-        selectedUserId: form.selectedUserId || null,
-        recipientCount: targetUsers.length,
-        createdAt: serverTimestamp(),
-        createdBy,
-      });
+      const sendGroupId = doc(collection(db, "notifications")).id;
 
       targetUsers.forEach((user) => {
         const notificationRef = doc(collection(db, "notifications"));
 
         batch.set(notificationRef, {
-          userId: user.id,
+          sendGroupId,
           title,
           message,
           type: form.type || "announcement",
           audience: form.audience || "all",
-          announcementId: announcementRef.id,
+          selectedUserId: form.selectedUserId || null,
+          userId: user.id,
+          recipientName: getUserName(user),
+          recipientRole: getUserRole(user),
+          recipientEmail: user?.email || null,
           read: false,
           createdAt: serverTimestamp(),
           createdBy,
           senderId: createdBy,
+          isAdminNotification: true,
         });
       });
 
       await batch.commit();
-
       resetForm();
 
       Alert.alert(
@@ -313,11 +354,12 @@ export default function AdminNotificationsScreen() {
     { key: "all", label: "All" },
     { key: "users", label: "Users" },
     { key: "providers", label: "Providers" },
+    { key: "admins", label: "Admins" },
     { key: "platform_alert", label: "Alerts" },
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView
@@ -518,7 +560,7 @@ export default function AdminNotificationsScreen() {
         <View style={styles.sectionCard}>
           <Text style={styles.sectionTitle}>Sent History</Text>
           <Text style={styles.sectionSubtitle}>
-            Review previously sent notifications and platform announcements
+            Review previously sent notifications from the notifications collection
           </Text>
 
           <ScrollView
@@ -557,9 +599,9 @@ export default function AdminNotificationsScreen() {
           ) : filteredAnnouncements.length === 0 ? (
             <View style={styles.stateWrap}>
               <Ionicons name="mail-open-outline" size={28} color="#9CA3AF" />
-              <Text style={styles.stateTitle}>No announcements found</Text>
+              <Text style={styles.stateTitle}>No sent history found</Text>
               <Text style={styles.stateText}>
-                Sent notifications will appear here
+                Send one notification and it will appear here
               </Text>
             </View>
           ) : (
@@ -586,7 +628,7 @@ export default function AdminNotificationsScreen() {
 
                       <View style={styles.historyTextWrap}>
                         <Text style={styles.historyTitle} numberOfLines={1}>
-                          {item?.title || "Untitled Announcement"}
+                          {item?.title || "Untitled Notification"}
                         </Text>
                         <Text style={styles.historyMeta}>
                           {getAnnouncementTypeLabel(item?.type)} · {getTimeAgo(item?.createdAt)}
@@ -611,6 +653,22 @@ export default function AdminNotificationsScreen() {
                         {formatNumber(item?.recipientCount || 0)} recipients
                       </Text>
                     </View>
+
+                    {item?.recipients?.slice(0, 2).map((recipient, index) => (
+                      <View key={`${item.id}-${index}`} style={styles.badge}>
+                        <Text style={styles.badgeText}>
+                          {recipient.name}
+                        </Text>
+                      </View>
+                    ))}
+
+                    {item?.recipientCount > 2 ? (
+                      <View style={styles.badge}>
+                        <Text style={styles.badgeText}>
+                          +{item.recipientCount - 2} more
+                        </Text>
+                      </View>
+                    ) : null}
                   </View>
                 </View>
               ))}
@@ -1056,6 +1114,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: "#4B5563",
     fontWeight: "800",
+    textTransform: "capitalize",
   },
 
   stateWrap: {

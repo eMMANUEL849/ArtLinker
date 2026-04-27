@@ -3,23 +3,18 @@ import { Ionicons } from "@expo/vector-icons";
 
 export default function AdminLayout() {
   return (
-    <Tabs
+  <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#4a63ff",
-        tabBarInactiveTintColor: "#9ca3af",
+        tabBarActiveTintColor: "#4F6BFF",
+        tabBarInactiveTintColor: "#CFCFE8",
         tabBarStyle: {
-          height: 70,
-          paddingTop: 8,
-          paddingBottom: 10,
-          backgroundColor: "#ffffff",
-          borderTopWidth: 0.5,
-          borderTopColor: "#e5e7eb",
+          height: 100,
+          paddingTop: 4,
+          paddingBottom: 30,
         },
         tabBarLabelStyle: {
           fontSize: 12,
-          fontWeight: "600",
-          marginTop: 1,
         },
       }}
     >
@@ -69,6 +64,12 @@ export default function AdminLayout() {
       />
       <Tabs.Screen
         name="analytics"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="feedback"
         options={{
           href: null,
         }}

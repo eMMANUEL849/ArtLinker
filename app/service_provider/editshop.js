@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -13,6 +13,7 @@ import {
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import {
@@ -288,7 +289,7 @@ export default function EditShopScreen() {
   const allPreviewImages = [...existingMediaUrls, ...newMediaUris];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#111827" />

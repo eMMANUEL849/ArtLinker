@@ -3,7 +3,7 @@ import {
   View,
   Text,
   StyleSheet,
-  SafeAreaView,
+  
   TextInput,
   ScrollView,
   TouchableOpacity,
@@ -16,6 +16,7 @@ import {
   StatusBar,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { useRouter } from "expo-router";
 import {
@@ -864,7 +865,7 @@ export default function HomeScreen() {
   const categoryPreview = useMemo(() => categories.slice(0, 5), []);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["top"]}>
       <StatusBar barStyle="light-content" />
       <ScrollView
         showsVerticalScrollIndicator={false}

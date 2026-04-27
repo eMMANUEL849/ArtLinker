@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import {
-  SafeAreaView,
+ 
   View,
   Text,
   StyleSheet,
@@ -10,6 +10,7 @@ import {
   Switch,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { signOut } from "firebase/auth";
 import { auth } from "../../config/firebase";
@@ -90,7 +91,7 @@ export default function ServiceProviderSettingsScreen() {
   );
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.header}>
         <TouchableOpacity
           style={styles.backButton}

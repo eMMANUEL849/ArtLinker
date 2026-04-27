@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+ 
   View,
   Text,
   StyleSheet,
@@ -12,6 +12,7 @@ import {
   ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as DocumentPicker from "expo-document-picker";
 import { onAuthStateChanged } from "firebase/auth";
@@ -810,7 +811,7 @@ export default function ServiceProviderRequestsScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.headerRow}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back-outline" size={22} color="#111827" />

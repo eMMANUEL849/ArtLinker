@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+
   View,
   Text,
   StyleSheet,
@@ -13,6 +13,7 @@ import {
   Dimensions,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { onAuthStateChanged } from "firebase/auth";
 import {
@@ -519,84 +520,98 @@ export default function ShopScreen() {
   }, [reviews]);
 
   const handleAddToCart = async (product, quantity) => {
-    try {
-      if (!currentUser) {
-        Alert.alert("Login Required", "Please log in first.");
-        return;
+  try {
+    if (!currentUser?.uid) {
+      Alert.alert("Login Required", "Please log in first.");
+      return;
+    }
+
+    const wantedQty = Number(quantity || 0);
+
+    if (wantedQty <= 0) {
+      Alert.alert("Error", "Please choose a valid quantity.");
+      return;
+    }
+
+    setAddingId(product.id);
+
+    const productRef = doc(db, "shops", product.id);
+    const cartRef = doc(db, "carts", `${currentUser.uid}_${product.id}`);
+
+    await runTransaction(db, async (transaction) => {
+      const productSnap = await transaction.get(productRef);
+      const cartSnap = await transaction.get(cartRef);
+
+      if (!productSnap.exists()) {
+        throw new Error("Product no longer exists.");
       }
 
-      const wantedQty = Number(quantity || 0);
-      if (wantedQty <= 0) {
-        Alert.alert("Error", "Please choose a valid quantity.");
-        return;
+      const productData = productSnap.data();
+      const currentStock = Number(productData.stock || 0);
+
+      if (currentStock <= 0) {
+        throw new Error("This product is out of stock.");
       }
 
-      setAddingId(product.id);
+      if (wantedQty > currentStock) {
+        throw new Error(`Only ${currentStock} item(s) left in stock.`);
+      }
 
-      const productRef = doc(db, "shops", product.id);
-      const cartRef = doc(db, "carts", `${currentUser.uid}_${product.id}`);
+      const existingCart = cartSnap.exists() ? cartSnap.data() : null;
+      const existingQty = Number(existingCart?.quantity || 0);
+      const newQty = existingQty + wantedQty;
+      const price = Number(productData.price || 0);
 
-      await runTransaction(db, async (transaction) => {
-        const productSnap = await transaction.get(productRef);
-        const cartSnap = await transaction.get(cartRef);
-
-        if (!productSnap.exists()) {
-          throw new Error("Product no longer exists.");
-        }
-
-        const productData = productSnap.data();
-        const currentStock = Number(productData.stock || 0);
-
-        if (currentStock < wantedQty) {
-          throw new Error("Selected quantity is more than available stock.");
-        }
-
-        const existingCart = cartSnap.exists() ? cartSnap.data() : null;
-        const existingQty = Number(existingCart?.quantity || 0);
-        const price = Number(productData.price || 0);
-
-        transaction.update(productRef, {
-          stock: currentStock - wantedQty,
-          updatedAt: serverTimestamp(),
-        });
-
-        transaction.set(
-          cartRef,
-          {
-            userId: currentUser.uid,
-            productId: product.id,
-            providerId: productData.providerId || null,
-            providerEmail: productData.providerEmail || null,
-            title: productData.title || "",
-            description: productData.description || "",
-            itemType: productData.itemType || "",
-            price,
-            totalPrice: price * (existingQty + wantedQty),
-            quantity: existingQty + wantedQty,
-            mediaUrl: productData.mediaUrl || "",
-            mediaUrls: Array.isArray(productData.mediaUrls)
-              ? productData.mediaUrls.filter(Boolean)
-              : productData.mediaUrl
-                ? [productData.mediaUrl]
-                : [],
-            size: productData.size || null,
-            brand: productData.brand || null,
-            color: productData.color || null,
-            createdAt: existingCart?.createdAt || serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
+      if (newQty > currentStock) {
+        throw new Error(
+          `You already have ${existingQty} in cart. Only ${currentStock} item(s) currently available.`
         );
+      }
+
+      transaction.update(productRef, {
+        stock: currentStock - wantedQty,
+        updatedAt: serverTimestamp(),
       });
 
-      Alert.alert("Added", "Product added to cart and stock updated.");
-    } catch (error) {
-      console.log("Add to cart error:", error);
-      Alert.alert("Error", error.message || "Failed to add product to cart.");
-    } finally {
-      setAddingId("");
-    }
-  };
+      transaction.set(
+        cartRef,
+        {
+          userId: currentUser.uid,
+          productId: product.id,
+          providerId: productData.providerId || null,
+          providerEmail: productData.providerEmail || null,
+          providerName: productData.providerName || null,
+          title: productData.title || "",
+          description: productData.description || "",
+          itemType: productData.itemType || "",
+          price,
+          quantity: newQty,
+          totalPrice: price * newQty,
+          mediaUrl: productData.mediaUrl || "",
+          mediaUrls: Array.isArray(productData.mediaUrls)
+            ? productData.mediaUrls.filter(Boolean)
+            : productData.mediaUrl
+              ? [productData.mediaUrl]
+              : [],
+          size: productData.size || null,
+          brand: productData.brand || null,
+          color: productData.color || null,
+          material: productData.material || null,
+          createdAt: existingCart?.createdAt || serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+    });
+
+    Alert.alert("Added", `${wantedQty} item(s) added to cart.`);
+  } catch (error) {
+    console.log("Add to cart error:", error);
+    Alert.alert("Error", error.message || "Failed to add product to cart.");
+  } finally {
+    setAddingId("");
+  }
+};
 
   const handleSubmitReview = async (product, rating, comment) => {
     try {
@@ -673,7 +688,7 @@ export default function ShopScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}

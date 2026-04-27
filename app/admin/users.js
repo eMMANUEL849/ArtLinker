@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -13,18 +13,20 @@ import {
   StatusBar,
   Modal,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons, Feather } from "@expo/vector-icons";
+import * as ImagePicker from "expo-image-picker";
 import {
   collection,
   onSnapshot,
   doc,
   updateDoc,
   deleteDoc,
-  addDoc,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
-import { db } from "../../config/firebase";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { db, storage } from "../../config/firebase";
 
 const DEFAULT_AVATAR = "https://via.placeholder.com/200x200.png?text=User";
 
@@ -172,6 +174,7 @@ const EMPTY_NEW_ACCOUNT = {
   displayName: "",
   username: "",
   email: "",
+  password: "",
   role: "user",
   accountType: "buyer",
   status: "active",
@@ -190,6 +193,10 @@ export default function AdminUsersScreen() {
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [newAccount, setNewAccount] = useState(EMPTY_NEW_ACCOUNT);
   const [creatingAccount, setCreatingAccount] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  const [avatarMenuVisible, setAvatarMenuVisible] = useState(false);
+  const [selectedAvatarAsset, setSelectedAvatarAsset] = useState(null);
 
   const [managedAccount, setManagedAccount] = useState(null);
 
@@ -420,55 +427,154 @@ export default function AdminUsersScreen() {
     }
   };
 
+  const pickAvatarFromGallery = async () => {
+    try {
+      setAvatarMenuVisible(false);
+
+      const permissionResult =
+        await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+      if (!permissionResult.granted) {
+        Alert.alert(
+          "Permission needed",
+          "Please allow photo library access to choose an avatar."
+        );
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ["images"],
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+
+      if (result.canceled) return;
+
+      const selected = result.assets?.[0];
+      if (!selected?.uri) return;
+
+      setSelectedAvatarAsset(selected);
+      setNewAccount((prev) => ({
+        ...prev,
+        avatar: selected.uri,
+      }));
+    } catch (error) {
+      console.log("Pick avatar error:", error);
+      Alert.alert("Error", "Failed to pick image");
+    }
+  };
+
+  const clearAvatarSelection = () => {
+    setSelectedAvatarAsset(null);
+    setNewAccount((prev) => ({ ...prev, avatar: "" }));
+    setAvatarMenuVisible(false);
+  };
+
+  const uploadAvatarIfNeeded = async (userId) => {
+  try {
+    if (!selectedAvatarAsset?.uri) {
+      return newAccount.avatar.trim() || "";
+    }
+
+    if (!storage) {
+      console.log("Storage is not configured, skipping avatar upload");
+      return newAccount.avatar.trim() || "";
+    }
+
+    const response = await fetch(selectedAvatarAsset.uri);
+    const blob = await response.blob();
+
+    const fileRef = ref(storage, `users/${userId}/avatar.jpg`);
+    await uploadBytes(fileRef, blob);
+    const downloadURL = await getDownloadURL(fileRef);
+
+    return downloadURL;
+  } catch (error) {
+    console.log("Avatar upload error:", error);
+    return "";
+  }
+};
+
+  const resetAddAccountForm = () => {
+    setNewAccount(EMPTY_NEW_ACCOUNT);
+    setSelectedAvatarAsset(null);
+    setShowPassword(false);
+    setAvatarMenuVisible(false);
+  };
+
   const handleCreateAccount = async () => {
-    const displayName = newAccount.displayName.trim();
-    const username = newAccount.username.trim().replace(/^@+/, "");
-    const email = newAccount.email.trim().toLowerCase();
+  const displayName = newAccount.displayName.trim();
+  const username = newAccount.username.trim().replace(/^@+/, "");
+  const email = newAccount.email.trim().toLowerCase();
+  const password = newAccount.password.trim();
 
-    if (!displayName || !email) {
-      Alert.alert("Missing details", "Please enter at least a name and email.");
-      return;
-    }
-
-    const emailExists = users.some(
-      (user) => user.email.trim().toLowerCase() === email
+  if (!displayName || !email || !password) {
+    Alert.alert(
+      "Missing details",
+      "Please enter full name, email, and password."
     );
+    return;
+  }
 
-    if (emailExists) {
-      Alert.alert("Duplicate email", "An account with this email already exists.");
-      return;
+  if (password.length < 6) {
+    Alert.alert("Weak password", "Password must be at least 6 characters.");
+    return;
+  }
+
+  const emailExists = users.some(
+    (user) => (user.email || "").trim().toLowerCase() === email
+  );
+
+  if (emailExists) {
+    Alert.alert("Duplicate email", "An account with this email already exists.");
+    return;
+  }
+
+  try {
+    setCreatingAccount(true);
+
+    const userRef = doc(collection(db, "users"));
+
+    let avatarUrl = "";
+    try {
+      avatarUrl = await uploadAvatarIfNeeded(userRef.id);
+    } catch (avatarError) {
+      console.log("Avatar step skipped:", avatarError);
+      avatarUrl = "";
     }
+
+    const payload = {
+      displayName,
+      name: displayName,
+      fullName: displayName,
+      username: username || email.split("@")[0],
+      email,
+      password,
+      role: newAccount.role,
+      accountType: newAccount.accountType,
+      userType: newAccount.accountType,
+      status: newAccount.status,
+      active: newAccount.status === "active",
+      verified: false,
+      isVerified: false,
+      verificationBadge: false,
+      hasVerificationBadge: false,
+      photoURL: avatarUrl || "",
+      avatar: avatarUrl || "",
+      image: avatarUrl || "",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      lastSeen: serverTimestamp(),
+    };
+
+    await setDoc(userRef, payload);
 
     try {
-      setCreatingAccount(true);
-
-      const payload = {
-        displayName,
-        name: displayName,
-        username: username || email.split("@")[0],
-        email,
-        role: newAccount.role,
-        accountType: newAccount.accountType,
-        userType: newAccount.accountType,
-        status: newAccount.status,
-        active: newAccount.status === "active",
-        verified: false,
-        isVerified: false,
-        verificationBadge: false,
-        hasVerificationBadge: false,
-        photoURL: newAccount.avatar.trim() || "",
-        avatar: newAccount.avatar.trim() || "",
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        lastSeen: serverTimestamp(),
-      };
-
-      const docRef = await addDoc(collection(db, "users"), payload);
-
       await setDoc(
-        doc(db, "notifications", `${docRef.id}_welcome_admin_created`),
+        doc(db, "notifications", `${userRef.id}_welcome_admin_created`),
         {
-          userId: docRef.id,
+          userId: userRef.id,
           title: "Account Created",
           message: "Your account has been created by an administrator.",
           type: "account_created",
@@ -476,18 +582,24 @@ export default function AdminUsersScreen() {
           createdAt: serverTimestamp(),
         },
         { merge: true }
-      ).catch(() => null);
-
-      setNewAccount(EMPTY_NEW_ACCOUNT);
-      setAddModalVisible(false);
-      Alert.alert("Success", "Account created successfully.");
-    } catch (error) {
-      console.log("Create account error:", error);
-      Alert.alert("Error", "Failed to create account.");
-    } finally {
-      setCreatingAccount(false);
+      );
+    } catch (notificationError) {
+      console.log("Notification create failed:", notificationError);
     }
-  };
+
+    resetAddAccountForm();
+    setAddModalVisible(false);
+    Alert.alert("Success", "Account created successfully.");
+  } catch (error) {
+    console.log("Create account error full:", error);
+    Alert.alert(
+      "Create account failed",
+      error?.message || "Something went wrong while saving to Firestore."
+    );
+  } finally {
+    setCreatingAccount(false);
+  }
+};
 
   const handleSwitchManagedAccount = (user) => {
     setManagedAccount(user);
@@ -586,7 +698,7 @@ export default function AdminUsersScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView
@@ -963,6 +1075,7 @@ export default function AdminUsersScreen() {
                 }
                 placeholder="Enter username"
                 placeholderTextColor="#9CA3AF"
+                autoCapitalize="none"
               />
 
               <Text style={styles.fieldLabel}>Email</Text>
@@ -978,17 +1091,84 @@ export default function AdminUsersScreen() {
                 keyboardType="email-address"
               />
 
-              <Text style={styles.fieldLabel}>Avatar URL</Text>
-              <TextInput
-                style={styles.input}
-                value={newAccount.avatar}
-                onChangeText={(text) =>
-                  setNewAccount((prev) => ({ ...prev, avatar: text }))
-                }
-                placeholder="Optional image URL"
-                placeholderTextColor="#9CA3AF"
-                autoCapitalize="none"
-              />
+              <Text style={styles.fieldLabel}>Password</Text>
+              <View style={styles.passwordWrap}>
+                <TextInput
+                  style={styles.passwordInput}
+                  value={newAccount.password}
+                  onChangeText={(text) =>
+                    setNewAccount((prev) => ({ ...prev, password: text }))
+                  }
+                  placeholder="Enter password"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={styles.passwordToggle}
+                  onPress={() => setShowPassword((prev) => !prev)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons
+                    name={showPassword ? "eye-off-outline" : "eye-outline"}
+                    size={18}
+                    color="#6B7280"
+                  />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.fieldLabel}>Avatar</Text>
+              <TouchableOpacity
+                style={styles.dropdownButton}
+                onPress={() => setAvatarMenuVisible((prev) => !prev)}
+                activeOpacity={0.85}
+              >
+                <View style={styles.dropdownButtonLeft}>
+                  <Ionicons name="image-outline" size={16} color="#6B7280" />
+                  <Text style={styles.dropdownButtonText}>
+                    {newAccount.avatar ? "Avatar selected" : "Select avatar"}
+                  </Text>
+                </View>
+                <Ionicons
+                  name={avatarMenuVisible ? "chevron-up" : "chevron-down"}
+                  size={18}
+                  color="#6B7280"
+                />
+              </TouchableOpacity>
+
+              {avatarMenuVisible ? (
+                <View style={styles.dropdownMenu}>
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={pickAvatarFromGallery}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="images-outline" size={17} color="#111827" />
+                    <Text style={styles.dropdownItemText}>
+                      Choose image from gallery
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.dropdownItem}
+                    onPress={clearAvatarSelection}
+                    activeOpacity={0.85}
+                  >
+                    <Ionicons name="trash-outline" size={17} color="#111827" />
+                    <Text style={styles.dropdownItemText}>Clear avatar</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+
+              {newAccount.avatar ? (
+                <View style={styles.avatarPreviewWrap}>
+                  <Image
+                    source={{ uri: newAccount.avatar }}
+                    style={styles.avatarPreview}
+                  />
+                  <Text style={styles.avatarPreviewText}>Selected avatar preview</Text>
+                </View>
+              ) : null}
 
               <Text style={styles.fieldLabel}>Role</Text>
               <View style={styles.optionRow}>
@@ -1539,7 +1719,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingTop: 18,
     paddingBottom: 28,
-    maxHeight: "85%",
+    maxHeight: "88%",
   },
   modalHeader: {
     flexDirection: "row",
@@ -1584,6 +1764,94 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#E5E7EB",
   },
+
+  passwordWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    height: 46,
+    backgroundColor: "#FFFFFF",
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    paddingHorizontal: 12,
+  },
+  passwordInput: {
+    flex: 1,
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "600",
+  },
+  passwordToggle: {
+    paddingLeft: 10,
+    paddingVertical: 4,
+  },
+
+  dropdownButton: {
+    minHeight: 46,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dropdownButtonLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  dropdownButtonText: {
+    marginLeft: 8,
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "600",
+  },
+  dropdownMenu: {
+    marginTop: 8,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    backgroundColor: "#FFFFFF",
+    overflow: "hidden",
+  },
+  dropdownItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: "#F3F4F6",
+  },
+  dropdownItemText: {
+    marginLeft: 10,
+    fontSize: 13,
+    color: "#111827",
+    fontWeight: "600",
+  },
+  avatarPreviewWrap: {
+    marginTop: 12,
+    alignItems: "center",
+    backgroundColor: "#F8FAFC",
+    borderRadius: 16,
+    paddingVertical: 14,
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+  },
+  avatarPreview: {
+    width: 82,
+    height: 82,
+    borderRadius: 41,
+    backgroundColor: "#E5E7EB",
+  },
+  avatarPreviewText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: "#64748B",
+    fontWeight: "600",
+  },
+
   optionRow: {
     flexDirection: "row",
     flexWrap: "wrap",

@@ -64,8 +64,20 @@ export default function UsersLayout() {
           href: null,
         }}
       />
+       <Tabs.Screen
+        name="feedback"
+        options={{
+          href: null,
+        }}
+      />
  <Tabs.Screen
         name="cart"
+        options={{
+          href: null,
+        }}
+      />
+      <Tabs.Screen
+        name="receipts"
         options={{
           href: null,
         }}
@@ -92,10 +104,7 @@ export default function UsersLayout() {
       <Tabs.Screen
         name="dms"
         options={{
-          title: "Messages",
-          tabBarIcon: ({ color, size }) => (
-            <Ionicons name="chatbubble" size={size} color={color} />
-          ),
+          href: null,
         }}
       />
 

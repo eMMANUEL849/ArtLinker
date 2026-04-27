@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
   View,
   Text,
   StyleSheet,
@@ -11,14 +10,9 @@ import {
   TouchableOpacity,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import {
-  collection,
-  doc,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
+import { collection, doc, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
 
 function formatMoney(value) {
@@ -60,18 +54,14 @@ function getImage(item) {
   if (Array.isArray(item?.images) && item.images.length > 0) {
     return item.images[0];
   }
-  if (item?.mediaUrl) {
-    return item.mediaUrl;
-  }
-  if (item?.imageUrl) {
-    return item.imageUrl;
-  }
+  if (item?.mediaUrl) return item.mediaUrl;
+  if (item?.imageUrl) return item.imageUrl;
   return "https://via.placeholder.com/400x300.png?text=No+Image";
 }
 
-function StatCard({ icon, title, value, sub, highlight = false }) {
+function StatCard({ icon, title, value, sub }) {
   return (
-    <View style={[styles.statCard, highlight && styles.statCardHighlight]}>
+    <View style={styles.statCard}>
       <View style={styles.iconWrap}>
         <Ionicons name={icon} size={22} color="#4a63ff" />
       </View>
@@ -82,59 +72,11 @@ function StatCard({ icon, title, value, sub, highlight = false }) {
   );
 }
 
-function paymentMatchesProvider(payment, providerUid, providerEmail) {
-  if (!payment) return false;
-
-  const topLevelMatch =
-    payment.providerId === providerUid ||
-    payment.providerUid === providerUid ||
-    payment.providerUserId === providerUid ||
-    (!!providerEmail && payment.providerEmail === providerEmail);
-
-  const itemLevelMatch =
-    Array.isArray(payment.items) &&
-    payment.items.some(
-      (item) =>
-        item?.providerId === providerUid ||
-        item?.providerUid === providerUid ||
-        item?.providerUserId === providerUid ||
-        (!!providerEmail && item?.providerEmail === providerEmail)
-    );
-
-  return topLevelMatch || itemLevelMatch;
-}
-
-function getProviderRevenue(payment, providerUid, providerEmail) {
+function getProviderRevenue(payment) {
   if (!payment) return 0;
-
-  const topLevelMatch =
-    payment.providerId === providerUid ||
-    payment.providerUid === providerUid ||
-    payment.providerUserId === providerUid ||
-    (!!providerEmail && payment.providerEmail === providerEmail);
-
-  if (topLevelMatch) {
-    return Number(
-      payment.totalAmount ??
-        payment.totalPrice ??
-        payment.providerAmount ??
-        payment.subtotal ??
-        payment.amount ??
-        payment.price ??
-        0
-    );
-  }
 
   if (Array.isArray(payment.items) && payment.items.length > 0) {
     return payment.items.reduce((sum, item) => {
-      const itemMatch =
-        item?.providerId === providerUid ||
-        item?.providerUid === providerUid ||
-        item?.providerUserId === providerUid ||
-        (!!providerEmail && item?.providerEmail === providerEmail);
-
-      if (!itemMatch) return sum;
-
       const qty = Number(item.quantity || 1);
       const amount =
         item.totalPrice != null
@@ -145,25 +87,23 @@ function getProviderRevenue(payment, providerUid, providerEmail) {
     }, 0);
   }
 
-  return 0;
+  return Number(
+    payment.totalAmount ??
+      payment.totalPrice ??
+      payment.providerAmount ??
+      payment.subtotal ??
+      payment.amount ??
+      payment.price ??
+      0
+  );
 }
 
-function buildPopularProductFromPayments(payments, providerUid, providerEmail) {
+function buildPopularProductFromPayments(payments) {
   const grouped = {};
 
   payments.forEach((payment) => {
-    if (!paymentMatchesProvider(payment, providerUid, providerEmail)) return;
-
     if (Array.isArray(payment.items) && payment.items.length > 0) {
       payment.items.forEach((item) => {
-        const itemMatch =
-          item?.providerId === providerUid ||
-          item?.providerUid === providerUid ||
-          item?.providerUserId === providerUid ||
-          (!!providerEmail && item?.providerEmail === providerEmail);
-
-        if (!itemMatch) return;
-
         const key = item.productId || item.id || item.title || "unknown";
 
         if (!grouped[key]) {
@@ -220,12 +160,12 @@ function buildPopularProductFromPayments(payments, providerUid, providerEmail) {
     grouped[key].revenue += revenue;
   });
 
-  const sorted = Object.values(grouped).sort((a, b) => {
-    if (b.quantity !== a.quantity) return b.quantity - a.quantity;
-    return b.revenue - a.revenue;
-  });
-
-  return sorted[0] || null;
+  return (
+    Object.values(grouped).sort((a, b) => {
+      if (b.quantity !== a.quantity) return b.quantity - a.quantity;
+      return b.revenue - a.revenue;
+    })[0] || null
+  );
 }
 
 export default function EarningsScreen() {
@@ -249,7 +189,6 @@ export default function EarningsScreen() {
     }
 
     const providerUid = user.uid;
-    const providerEmail = user.email || "";
 
     let productsReady = false;
     let paymentsReady = false;
@@ -274,7 +213,10 @@ export default function EarningsScreen() {
       where("providerId", "==", providerUid)
     );
 
-    const paymentsQuery = query(collection(db, "payments"));
+    const paymentsQuery = query(
+      collection(db, "payments"),
+      where("providerId", "==", providerUid)
+    );
 
     const transactionsQuery = query(
       collection(db, "earning_transactions"),
@@ -299,7 +241,6 @@ export default function EarningsScreen() {
       },
       (error) => {
         console.log("Products error:", error);
-        Alert.alert("Error", "Failed to load products.");
         productsReady = true;
         done();
       }
@@ -308,22 +249,16 @@ export default function EarningsScreen() {
     const unsubPayments = onSnapshot(
       paymentsQuery,
       (snapshot) => {
-        const allPayments = snapshot.docs.map((docSnap) => ({
+        const data = snapshot.docs.map((docSnap) => ({
           id: docSnap.id,
           ...docSnap.data(),
         }));
-
-        const filteredPayments = allPayments.filter((payment) =>
-          paymentMatchesProvider(payment, providerUid, providerEmail)
-        );
-
-        setPayments(filteredPayments);
+        setPayments(data);
         paymentsReady = true;
         done();
       },
       (error) => {
         console.log("Payments load error:", error);
-        Alert.alert("Error", "Failed to load provider payment data.");
         paymentsReady = true;
         done();
       }
@@ -345,7 +280,6 @@ export default function EarningsScreen() {
       },
       (error) => {
         console.log("Earning transactions error:", error);
-        Alert.alert("Error", "Failed to load earning transactions.");
         transactionsReady = true;
         done();
       }
@@ -367,7 +301,6 @@ export default function EarningsScreen() {
       },
       (error) => {
         console.log("Withdrawals error:", error);
-        Alert.alert("Error", "Failed to load withdrawals.");
         withdrawalsReady = true;
         done();
       }
@@ -376,20 +309,19 @@ export default function EarningsScreen() {
     const unsubEarnings = onSnapshot(
       doc(db, "earnings", providerUid),
       (docSnap) => {
-        if (docSnap.exists()) {
-          setEarningsDoc({
-            id: docSnap.id,
-            ...docSnap.data(),
-          });
-        } else {
-          setEarningsDoc(null);
-        }
+        setEarningsDoc(
+          docSnap.exists()
+            ? {
+                id: docSnap.id,
+                ...docSnap.data(),
+              }
+            : null
+        );
         earningsReady = true;
         done();
       },
       (error) => {
         console.log("Earnings doc error:", error);
-        Alert.alert("Error", "Failed to load earnings summary.");
         earningsReady = true;
         done();
       }
@@ -407,34 +339,23 @@ export default function EarningsScreen() {
   const totalIncome = useMemo(() => {
     const earningsTotal = Number(earningsDoc?.totalIncome || 0);
 
-    if (earningsTotal > 0) {
-      return earningsTotal;
-    }
-
-    const providerUid = auth.currentUser?.uid;
-    const providerEmail = auth.currentUser?.email || "";
-
-    if (!providerUid) return 0;
+    if (earningsTotal > 0) return earningsTotal;
 
     const fromTransactions = earningTransactions.reduce((sum, item) => {
       return sum + Number(item.amount || 0);
     }, 0);
 
-    if (fromTransactions > 0) {
-      return fromTransactions;
-    }
+    if (fromTransactions > 0) return fromTransactions;
 
     return payments.reduce((sum, payment) => {
-      return sum + getProviderRevenue(payment, providerUid, providerEmail);
+      return sum + getProviderRevenue(payment);
     }, 0);
   }, [earningsDoc, earningTransactions, payments]);
 
   const totalWithdrawn = useMemo(() => {
     const earningsWithdrawn = Number(earningsDoc?.totalWithdrawn || 0);
 
-    if (earningsWithdrawn > 0) {
-      return earningsWithdrawn;
-    }
+    if (earningsWithdrawn > 0) return earningsWithdrawn;
 
     return withdrawals.reduce((sum, item) => {
       return sum + Number(item.amount || 0);
@@ -457,16 +378,7 @@ export default function EarningsScreen() {
   }, [earningTransactions]);
 
   const popularProduct = useMemo(() => {
-    const providerUid = auth.currentUser?.uid;
-    const providerEmail = auth.currentUser?.email || "";
-
-    if (!providerUid) return null;
-
-    return buildPopularProductFromPayments(
-      payments,
-      providerUid,
-      providerEmail
-    );
+    return buildPopularProductFromPayments(payments);
   }, [payments]);
 
   const lowStockProducts = useMemo(() => {
@@ -479,31 +391,31 @@ export default function EarningsScreen() {
     return earningTransactions.slice(0, 20);
   }, [earningTransactions]);
 
- const handleWithdrawPress = () => {
-  const user = auth.currentUser;
+  const handleWithdrawPress = () => {
+    const user = auth.currentUser;
 
-  if (!user?.uid) {
-    Alert.alert("Error", "Please log in first.");
-    return;
-  }
+    if (!user?.uid) {
+      Alert.alert("Error", "Please log in first.");
+      return;
+    }
 
-  if (availableBalance <= 0) {
-    Alert.alert("No Balance", "You do not have any available income to withdraw.");
-    return;
-  }
+    if (availableBalance <= 0) {
+      Alert.alert("No Balance", "You do not have any available income to withdraw.");
+      return;
+    }
 
-  router.push({
-    pathname: "/service_provider/withdraw",
-    params: {
-      availableBalance: String(availableBalance),
-      totalIncome: String(totalIncome),
-      totalWithdrawn: String(totalWithdrawn),
-    },
-  });
-};
+    router.push({
+      pathname: "/service_provider/withdraw",
+      params: {
+        availableBalance: String(availableBalance),
+        totalIncome: String(totalIncome),
+        totalWithdrawn: String(totalWithdrawn),
+      },
+    });
+  };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -521,7 +433,8 @@ export default function EarningsScreen() {
 
         <Text style={styles.heading}>Earnings</Text>
         <Text style={styles.subheading}>
-          See your total income, available balance, previous earnings and product performance
+          See your total income, available balance, previous earnings and product
+          performance
         </Text>
 
         {loading ? (
@@ -535,9 +448,7 @@ export default function EarningsScreen() {
               <View style={styles.balanceTopRow}>
                 <View>
                   <Text style={styles.balanceLabel}>Total Income</Text>
-                  <Text style={styles.balanceAmount}>
-                    {formatMoney(totalIncome)}
-                  </Text>
+                  <Text style={styles.balanceAmount}>{formatMoney(totalIncome)}</Text>
                 </View>
 
                 <View style={styles.balanceIconWrap}>
@@ -563,14 +474,12 @@ export default function EarningsScreen() {
                   onPress={handleWithdrawPress}
                   disabled={availableBalance <= 0}
                 >
-                  <>
-                    <Ionicons
-                      name="arrow-down-circle-outline"
-                      size={16}
-                      color="#FFFFFF"
-                    />
-                    <Text style={styles.withdrawButtonText}>Withdraw</Text>
-                  </>
+                  <Ionicons
+                    name="arrow-down-circle-outline"
+                    size={16}
+                    color="#FFFFFF"
+                  />
+                  <Text style={styles.withdrawButtonText}>Withdraw</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -628,26 +537,17 @@ export default function EarningsScreen() {
               {showIncomeHistory && (
                 <View style={styles.dropdownBody}>
                   {recentTransactions.length === 0 ? (
-                    <Text style={styles.emptyText}>
-                      No income transactions yet.
-                    </Text>
+                    <Text style={styles.emptyText}>No income transactions yet.</Text>
                   ) : (
                     recentTransactions.map((item) => (
                       <View key={item.id} style={styles.transactionRow}>
                         <View style={styles.transactionLeft}>
                           <View style={styles.transactionIcon}>
-                            <Ionicons
-                              name="cash-outline"
-                              size={18}
-                              color="#15803d"
-                            />
+                            <Ionicons name="cash-outline" size={18} color="#15803d" />
                           </View>
 
                           <View style={styles.transactionInfo}>
-                            <Text
-                              style={styles.transactionTitle}
-                              numberOfLines={1}
-                            >
+                            <Text style={styles.transactionTitle} numberOfLines={1}>
                               {item.title || "Service Request"}
                             </Text>
                             <Text style={styles.transactionMeta}>
@@ -686,9 +586,7 @@ export default function EarningsScreen() {
                     <Text style={styles.featuredType}>
                       {popularProduct.itemType}
                     </Text>
-                    <Text style={styles.featuredTitle}>
-                      {popularProduct.title}
-                    </Text>
+                    <Text style={styles.featuredTitle}>{popularProduct.title}</Text>
                     <Text style={styles.featuredMeta}>
                       Sold: {popularProduct.quantity} item(s)
                     </Text>
@@ -895,10 +793,6 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 3 },
     elevation: 3,
-  },
-  statCardHighlight: {
-    borderWidth: 1,
-    borderColor: "#dbeafe",
   },
   iconWrap: {
     width: 42,

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Video } from "expo-av";
 import { Ionicons } from "@expo/vector-icons";
 import {
@@ -631,7 +632,7 @@ export default function UploadShopItemScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <ScrollView
         contentContainerStyle={styles.container}
         showsVerticalScrollIndicator={false}

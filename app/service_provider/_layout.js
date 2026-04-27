@@ -7,11 +7,11 @@ export default function ServiceProviderLayout() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: "#4F6BFF",
-        tabBarInactiveTintColor: "#999",
+        tabBarInactiveTintColor: "#CFCFE8",
         tabBarStyle: {
-          height: 68,
-          paddingTop: 8,
-          paddingBottom: 10,
+          height: 100,
+          paddingTop: 4,
+          paddingBottom: 30,
         },
         tabBarLabelStyle: {
           fontSize: 12,

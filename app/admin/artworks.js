@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+ 
   View,
   Text,
   StyleSheet,
@@ -15,6 +15,7 @@ import {
   StatusBar,
 } from "react-native";
 import { Ionicons, Feather } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import {
   collection,
   onSnapshot,
@@ -619,7 +620,7 @@ export default function AdminArtworksScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView

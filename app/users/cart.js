@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -20,6 +20,7 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../../config/firebase";
 
 export default function CartScreen() {
@@ -96,7 +97,7 @@ export default function CartScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <View style={styles.topBar}>
         <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
           <Ionicons name="chevron-back" size={22} color="#111827" />

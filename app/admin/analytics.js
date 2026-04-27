@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+ 
   View,
   Text,
   StyleSheet,
@@ -12,7 +12,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { collection, onSnapshot } from "firebase/firestore";
 import { db } from "../../config/firebase";
-
+import { SafeAreaView } from "react-native-safe-area-context";
 function formatNumber(value) {
   return Number(value || 0).toLocaleString();
 }
@@ -458,7 +458,7 @@ export default function AdminAnalyticsScreen() {
   ];
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView
@@ -817,8 +817,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#F8FAFC",
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
+    paddingHorizontal: 17,
+    paddingTop: 19,
     paddingBottom: 24,
   },
 

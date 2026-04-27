@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  SafeAreaView,
+
   View,
   Text,
   StyleSheet,
@@ -16,6 +16,7 @@ import {
   useWindowDimensions,
 } from "react-native";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   addDoc,
@@ -516,7 +517,7 @@ export default function UserDmsScreen() {
 
   if (!currentUser) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={["top"]}>
         <View style={styles.centerBox}>
           <Ionicons name="lock-closed-outline" size={42} color="#7C3AED" />
           <Text style={styles.emptyTitle}>Please log in</Text>

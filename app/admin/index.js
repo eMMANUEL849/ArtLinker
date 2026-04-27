@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -13,8 +13,8 @@ import {
   Pressable,
   ActivityIndicator,
 } from "react-native";
-import { Ionicons, Feather } from "@expo/vector-icons";
-import { signOut } from "firebase/auth";
+import { Ionicons } from "@expo/vector-icons";
+import { signOut, onAuthStateChanged } from "firebase/auth";
 import { useRouter } from "expo-router";
 import {
   collection,
@@ -24,7 +24,7 @@ import {
   orderBy,
   query,
 } from "firebase/firestore";
-
+import { SafeAreaView } from "react-native-safe-area-context";
 import { auth, db } from "../../config/firebase";
 
 const DEFAULT_IMAGE =
@@ -108,23 +108,13 @@ function getArtworkSaves(item) {
 }
 
 function getReportStatus(item) {
-  return (
-    item?.status ||
-    item?.reportStatus ||
-    item?.state ||
-    "pending"
-  )
+  return (item?.status || item?.reportStatus || item?.state || "pending")
     .toString()
     .toLowerCase();
 }
 
 function getUserStatus(user) {
-  return (
-    user?.status ||
-    user?.accountStatus ||
-    user?.state ||
-    "active"
-  )
+  return (user?.status || user?.accountStatus || user?.state || "active")
     .toString()
     .toLowerCase();
 }
@@ -214,9 +204,13 @@ function getRevenueValue(item) {
 
 export default function AdminDashboardScreen() {
   const router = useRouter();
+  const isMountedRef = useRef(true);
+  const hasRedirectedRef = useRef(false);
 
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [adminName, setAdminName] = useState("Admin");
+  const [authReady, setAuthReady] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
   const [loadingStats, setLoadingStats] = useState(true);
   const [loadingArtworks, setLoadingArtworks] = useState(true);
@@ -241,216 +235,289 @@ export default function AdminDashboardScreen() {
   const [recentAlerts, setRecentAlerts] = useState([]);
 
   useEffect(() => {
-    const currentUser = auth.currentUser;
+    isMountedRef.current = true;
+    const screenUnsubs = [];
 
-    if (!currentUser) {
-      setLoadingStats(false);
-      setLoadingArtworks(false);
-      setLoadingAlerts(false);
-      return;
-    }
+    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+      if (!isMountedRef.current) return;
 
-    const unsubscribers = [];
+      setAuthReady(true);
 
-    const unsubUser = onSnapshot(
-      doc(db, "users", currentUser.uid),
-      (snap) => {
-        if (snap.exists()) {
-          setAdminName(getDisplayName(snap.data(), currentUser));
-        } else {
+      screenUnsubs.forEach((unsubscribe) => {
+        try {
+          unsubscribe?.();
+        } catch (error) {}
+      });
+      screenUnsubs.length = 0;
+
+      if (!currentUser) {
+        setAdminName("Admin");
+        setRecentArtworks([]);
+        setRecentAlerts([]);
+        setStats({
+          totalUsers: 0,
+          activeUsers: 0,
+          newSignUps: 0,
+          totalArtworks: 0,
+          uploadsToday: 0,
+          totalLikes: 0,
+          totalComments: 0,
+          totalSaves: 0,
+          revenue: 0,
+          totalReports: 0,
+          flaggedContent: 0,
+          reportedUsers: 0,
+        });
+        setLoadingStats(false);
+        setLoadingArtworks(false);
+        setLoadingAlerts(false);
+
+        if (!hasRedirectedRef.current) {
+          hasRedirectedRef.current = true;
+          router.replace("/auth/login");
+        }
+        return;
+      }
+
+      hasRedirectedRef.current = false;
+      setLoadingStats(true);
+      setLoadingArtworks(true);
+      setLoadingAlerts(true);
+
+      const unsubUser = onSnapshot(
+        doc(db, "users", currentUser.uid),
+        (snap) => {
+          if (!isMountedRef.current) return;
+
+          if (snap.exists()) {
+            setAdminName(getDisplayName(snap.data(), currentUser));
+          } else {
+            setAdminName(getDisplayName(null, currentUser));
+          }
+        },
+        () => {
+          if (!isMountedRef.current) return;
           setAdminName(getDisplayName(null, currentUser));
         }
-      },
-      () => {
-        setAdminName(getDisplayName(null, currentUser));
-      }
-    );
-    unsubscribers.push(unsubUser);
-
-    let usersData = [];
-    let reportsData = [];
-    let postsData = [];
-    let artworksData = [];
-    let paymentsData = [];
-
-    const updateStats = () => {
-      const artworkSource = postsData.length > 0 ? postsData : artworksData;
-
-      const activeUsers = usersData.filter((user) => isActiveUser(user)).length;
-      const newSignUps = usersData.filter((user) =>
-        isWithinDays(user?.createdAt || user?.joinedAt || user?.dateCreated, 7)
-      ).length;
-
-      const uploadsToday = artworkSource.filter((item) =>
-        isToday(item?.createdAt)
-      ).length;
-
-      const totalLikes = artworkSource.reduce(
-        (sum, item) => sum + getArtworkLikes(item),
-        0
       );
+      screenUnsubs.push(unsubUser);
 
-      const totalComments = artworkSource.reduce(
-        (sum, item) => sum + getArtworkComments(item),
-        0
-      );
+      let usersData = [];
+      let reportsData = [];
+      let postsData = [];
+      let artworksData = [];
+      let paymentsData = [];
 
-      const totalSaves = artworkSource.reduce(
-        (sum, item) => sum + getArtworkSaves(item),
-        0
-      );
+      const updateStats = () => {
+        if (!isMountedRef.current) return;
 
-      const revenue = paymentsData.reduce(
-        (sum, item) => sum + getRevenueValue(item),
-        0
-      );
+        const artworkSource = postsData.length > 0 ? postsData : artworksData;
 
-      const flaggedContent = reportsData.filter((item) => {
-        const type = (
-          item?.type ||
-          item?.reportType ||
-          item?.category ||
-          ""
-        )
-          .toString()
-          .toLowerCase();
+        const activeUsers = usersData.filter((user) => isActiveUser(user)).length;
+        const newSignUps = usersData.filter((user) =>
+          isWithinDays(user?.createdAt || user?.joinedAt || user?.dateCreated, 7)
+        ).length;
 
-        return (
-          type.includes("content") ||
-          type.includes("post") ||
-          type.includes("artwork") ||
-          type.includes("image")
+        const uploadsToday = artworkSource.filter((item) =>
+          isToday(item?.createdAt)
+        ).length;
+
+        const totalLikes = artworkSource.reduce(
+          (sum, item) => sum + getArtworkLikes(item),
+          0
         );
-      }).length;
 
-      const reportedUsers = reportsData.filter((item) => {
-        const type = (
-          item?.type ||
-          item?.reportType ||
-          item?.category ||
-          ""
-        )
-          .toString()
-          .toLowerCase();
-
-        return (
-          type.includes("user") ||
-          type.includes("account") ||
-          type.includes("artist") ||
-          type.includes("provider")
+        const totalComments = artworkSource.reduce(
+          (sum, item) => sum + getArtworkComments(item),
+          0
         );
-      }).length;
 
-      setStats({
-        totalUsers: usersData.length,
-        activeUsers,
-        newSignUps,
-        totalArtworks: artworkSource.length,
-        uploadsToday,
-        totalLikes,
-        totalComments,
-        totalSaves,
-        revenue,
-        totalReports: reportsData.length,
-        flaggedContent,
-        reportedUsers,
-      });
+        const totalSaves = artworkSource.reduce(
+          (sum, item) => sum + getArtworkSaves(item),
+          0
+        );
 
-      setLoadingStats(false);
-    };
+        const revenue = paymentsData.reduce(
+          (sum, item) => sum + getRevenueValue(item),
+          0
+        );
 
-    const unsubUsers = onSnapshot(
-      collection(db, "users"),
-      (snap) => {
-        usersData = snap.docs.map((docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        }));
-        updateStats();
-      },
-      () => {
-        usersData = [];
-        updateStats();
-      }
-    );
-    unsubscribers.push(unsubUsers);
+        const flaggedContent = reportsData.filter((item) => {
+          const type = (
+            item?.type ||
+            item?.reportType ||
+            item?.category ||
+            ""
+          )
+            .toString()
+            .toLowerCase();
 
-    const unsubReports = onSnapshot(
-      collection(db, "reports"),
-      (snap) => {
-        reportsData = snap.docs.map((docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        }));
-        updateStats();
-      },
-      () => {
-        reportsData = [];
-        updateStats();
-      }
-    );
-    unsubscribers.push(unsubReports);
+          return (
+            type.includes("content") ||
+            type.includes("post") ||
+            type.includes("artwork") ||
+            type.includes("image")
+          );
+        }).length;
 
-    const unsubPayments = onSnapshot(
-      collection(db, "payments"),
-      (snap) => {
-        paymentsData = snap.docs.map((docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        }));
-        updateStats();
-      },
-      () => {
-        paymentsData = [];
-        updateStats();
-      }
-    );
-    unsubscribers.push(unsubPayments);
+        const reportedUsers = reportsData.filter((item) => {
+          const type = (
+            item?.type ||
+            item?.reportType ||
+            item?.category ||
+            ""
+          )
+            .toString()
+            .toLowerCase();
 
-    const unsubPosts = onSnapshot(
-      collection(db, "posts"),
-      (snap) => {
-        postsData = snap.docs.map((docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        }));
-        updateStats();
-      },
-      () => {
-        postsData = [];
-        updateStats();
-      }
-    );
-    unsubscribers.push(unsubPosts);
+          return (
+            type.includes("user") ||
+            type.includes("account") ||
+            type.includes("artist") ||
+            type.includes("provider")
+          );
+        }).length;
 
-    const unsubArtworks = onSnapshot(
-      collection(db, "artworks"),
-      (snap) => {
-        artworksData = snap.docs.map((docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        }));
-        updateStats();
-      },
-      () => {
-        artworksData = [];
-        updateStats();
-      }
-    );
-    unsubscribers.push(unsubArtworks);
+        setStats({
+          totalUsers: usersData.length,
+          activeUsers,
+          newSignUps,
+          totalArtworks: artworkSource.length,
+          uploadsToday,
+          totalLikes,
+          totalComments,
+          totalSaves,
+          revenue,
+          totalReports: reportsData.length,
+          flaggedContent,
+          reportedUsers,
+        });
 
-    const unsubRecentPosts = onSnapshot(
-      query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(5)),
-      (snap) => {
-        const list = snap.docs.map((docItem) => ({
-          id: docItem.id,
-          ...docItem.data(),
-        }));
+        setLoadingStats(false);
+      };
 
-        if (list.length > 0) {
-          setRecentArtworks(list);
-          setLoadingArtworks(false);
-        } else {
+      const unsubUsers = onSnapshot(
+        collection(db, "users"),
+        (snap) => {
+          usersData = snap.docs.map((docItem) => ({
+            id: docItem.id,
+            ...docItem.data(),
+          }));
+          updateStats();
+        },
+        () => {
+          usersData = [];
+          updateStats();
+        }
+      );
+      screenUnsubs.push(unsubUsers);
+
+      const unsubReports = onSnapshot(
+        collection(db, "reports"),
+        (snap) => {
+          reportsData = snap.docs.map((docItem) => ({
+            id: docItem.id,
+            ...docItem.data(),
+          }));
+          updateStats();
+        },
+        () => {
+          reportsData = [];
+          updateStats();
+        }
+      );
+      screenUnsubs.push(unsubReports);
+
+      const unsubPayments = onSnapshot(
+        collection(db, "payments"),
+        (snap) => {
+          paymentsData = snap.docs.map((docItem) => ({
+            id: docItem.id,
+            ...docItem.data(),
+          }));
+          updateStats();
+        },
+        () => {
+          paymentsData = [];
+          updateStats();
+        }
+      );
+      screenUnsubs.push(unsubPayments);
+
+      const unsubPosts = onSnapshot(
+        collection(db, "posts"),
+        (snap) => {
+          postsData = snap.docs.map((docItem) => ({
+            id: docItem.id,
+            ...docItem.data(),
+          }));
+          updateStats();
+        },
+        () => {
+          postsData = [];
+          updateStats();
+        }
+      );
+      screenUnsubs.push(unsubPosts);
+
+      const unsubArtworks = onSnapshot(
+        collection(db, "artworks"),
+        (snap) => {
+          artworksData = snap.docs.map((docItem) => ({
+            id: docItem.id,
+            ...docItem.data(),
+          }));
+          updateStats();
+        },
+        () => {
+          artworksData = [];
+          updateStats();
+        }
+      );
+      screenUnsubs.push(unsubArtworks);
+
+      const unsubRecentPosts = onSnapshot(
+        query(collection(db, "posts"), orderBy("createdAt", "desc"), limit(5)),
+        (snap) => {
+          if (!isMountedRef.current) return;
+
+          const list = snap.docs.map((docItem) => ({
+            id: docItem.id,
+            ...docItem.data(),
+          }));
+
+          if (list.length > 0) {
+            setRecentArtworks(list);
+            setLoadingArtworks(false);
+          } else {
+            const unsubFallbackRecentArtworks = onSnapshot(
+              query(
+                collection(db, "artworks"),
+                orderBy("createdAt", "desc"),
+                limit(5)
+              ),
+              (fallbackSnap) => {
+                if (!isMountedRef.current) return;
+
+                setRecentArtworks(
+                  fallbackSnap.docs.map((docItem) => ({
+                    id: docItem.id,
+                    ...docItem.data(),
+                  }))
+                );
+                setLoadingArtworks(false);
+              },
+              () => {
+                if (!isMountedRef.current) return;
+                setRecentArtworks([]);
+                setLoadingArtworks(false);
+              }
+            );
+
+            screenUnsubs.push(unsubFallbackRecentArtworks);
+          }
+        },
+        () => {
           const unsubFallbackRecentArtworks = onSnapshot(
             query(
               collection(db, "artworks"),
@@ -458,6 +525,8 @@ export default function AdminDashboardScreen() {
               limit(5)
             ),
             (fallbackSnap) => {
+              if (!isMountedRef.current) return;
+
               setRecentArtworks(
                 fallbackSnap.docs.map((docItem) => ({
                   id: docItem.id,
@@ -467,63 +536,53 @@ export default function AdminDashboardScreen() {
               setLoadingArtworks(false);
             },
             () => {
+              if (!isMountedRef.current) return;
               setRecentArtworks([]);
               setLoadingArtworks(false);
             }
           );
 
-          unsubscribers.push(unsubFallbackRecentArtworks);
+          screenUnsubs.push(unsubFallbackRecentArtworks);
         }
-      },
-      () => {
-        const unsubFallbackRecentArtworks = onSnapshot(
-          query(collection(db, "artworks"), orderBy("createdAt", "desc"), limit(5)),
-          (fallbackSnap) => {
-            setRecentArtworks(
-              fallbackSnap.docs.map((docItem) => ({
-                id: docItem.id,
-                ...docItem.data(),
-              }))
-            );
-            setLoadingArtworks(false);
-          },
-          () => {
-            setRecentArtworks([]);
-            setLoadingArtworks(false);
-          }
-        );
+      );
+      screenUnsubs.push(unsubRecentPosts);
 
-        unsubscribers.push(unsubFallbackRecentArtworks);
-      }
-    );
-    unsubscribers.push(unsubRecentPosts);
+      const unsubRecentAlerts = onSnapshot(
+        query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(5)),
+        (snap) => {
+          if (!isMountedRef.current) return;
 
-    const unsubRecentAlerts = onSnapshot(
-      query(collection(db, "reports"), orderBy("createdAt", "desc"), limit(5)),
-      (snap) => {
-        setRecentAlerts(
-          snap.docs.map((docItem) => ({
-            id: docItem.id,
-            ...docItem.data(),
-          }))
-        );
-        setLoadingAlerts(false);
-      },
-      () => {
-        setRecentAlerts([]);
-        setLoadingAlerts(false);
-      }
-    );
-    unsubscribers.push(unsubRecentAlerts);
+          setRecentAlerts(
+            snap.docs.map((docItem) => ({
+              id: docItem.id,
+              ...docItem.data(),
+            }))
+          );
+          setLoadingAlerts(false);
+        },
+        () => {
+          if (!isMountedRef.current) return;
+          setRecentAlerts([]);
+          setLoadingAlerts(false);
+        }
+      );
+      screenUnsubs.push(unsubRecentAlerts);
+    });
 
     return () => {
-      unsubscribers.forEach((unsubscribe) => {
+      isMountedRef.current = false;
+
+      try {
+        unsubscribeAuth?.();
+      } catch (error) {}
+
+      screenUnsubs.forEach((unsubscribe) => {
         try {
           unsubscribe?.();
         } catch (error) {}
       });
     };
-  }, []);
+  }, [router]);
 
   const topStats = useMemo(
     () => [
@@ -673,6 +732,12 @@ export default function AdminDashboardScreen() {
       route: "/admin/analytics",
     },
     {
+      id: "feedback",
+      label: "Feedback",
+      icon: "chatbubbles-outline",
+      route: "/admin/feedback",
+    },
+    {
       id: "jobs_management",
       label: "Jobs Management",
       icon: "briefcase-outline",
@@ -711,26 +776,37 @@ export default function AdminDashboardScreen() {
   };
 
   const handleLogout = async () => {
+    if (isLoggingOut) return;
+
     try {
+      setIsLoggingOut(true);
       setDrawerOpen(false);
       await signOut(auth);
       router.replace("/auth/login");
     } catch (error) {
-      Alert.alert("Error", "Failed to logout");
+      console.log("Logout error:", error);
+      Alert.alert("Error", error?.message || "Failed to logout");
+    } finally {
+      if (isMountedRef.current) {
+        setIsLoggingOut(false);
+      }
     }
   };
 
   const confirmLogout = () => {
+    if (isLoggingOut) return;
+
     Alert.alert("Logout", "Are you sure you want to logout?", [
       { text: "Cancel", style: "cancel" },
       { text: "Logout", style: "destructive", onPress: handleLogout },
     ]);
   };
 
-  const isPageLoading = loadingStats && loadingArtworks && loadingAlerts;
+  const isPageLoading =
+    !authReady || loadingStats || loadingArtworks || loadingAlerts;
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView
@@ -751,14 +827,21 @@ export default function AdminDashboardScreen() {
 
             <View style={styles.heroTopRight}>
               <TouchableOpacity
-                style={styles.profileButton}
-                onPress={() => setDrawerOpen(true)}
+                style={[styles.logoutButton, isLoggingOut && styles.disabledItem]}
+                onPress={confirmLogout}
                 activeOpacity={0.85}
+                disabled={isLoggingOut}
               >
-                <View style={styles.profileCircle}>
-                  <Ionicons name="person" size={18} color="#111827" />
+                <View style={styles.logoutCircle}>
+                  {isLoggingOut ? (
+                    <ActivityIndicator size="small" color="#EF4444" />
+                  ) : (
+                    <Ionicons name="log-out-outline" size={18} color="#EF4444" />
+                  )}
                 </View>
-                <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                {!isLoggingOut && (
+                  <Ionicons name="chevron-down" size={16} color="#6B7280" />
+                )}
               </TouchableOpacity>
             </View>
           </View>
@@ -787,7 +870,9 @@ export default function AdminDashboardScreen() {
         {isPageLoading ? (
           <View style={styles.loadingCard}>
             <ActivityIndicator size="small" color="#7C3AED" />
-            <Text style={styles.loadingText}>Loading dashboard...</Text>
+            <Text style={styles.loadingText}>
+              {isLoggingOut ? "Logging out..." : "Loading dashboard..."}
+            </Text>
           </View>
         ) : (
           <>
@@ -1105,14 +1190,17 @@ export default function AdminDashboardScreen() {
                 ))}
 
                 <TouchableOpacity
-                  style={styles.drawerItem}
+                  style={[styles.drawerItem, isLoggingOut && styles.disabledItem]}
                   onPress={confirmLogout}
                   activeOpacity={0.85}
+                  disabled={isLoggingOut}
                 >
                   <View style={[styles.drawerItemIconWrap, styles.logoutIconWrap]}>
                     <Ionicons name="log-out-outline" size={18} color="#EF4444" />
                   </View>
-                  <Text style={styles.drawerLogoutText}>Logout</Text>
+                  <Text style={styles.drawerLogoutText}>
+                    {isLoggingOut ? "Logging out..." : "Logout"}
+                  </Text>
                   <Ionicons
                     name="chevron-forward-outline"
                     size={16}
@@ -1139,10 +1227,11 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: "#F8FAFC",
+    marginTop: 10,
   },
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
+    paddingHorizontal: 17,
+    paddingTop: 19,
     paddingBottom: 28,
   },
 
@@ -1206,7 +1295,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 999,
   },
-  profileButton: {
+  logoutButton: {
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#F8FAFC",
@@ -1216,7 +1305,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#DCE3ED",
   },
-  profileCircle: {
+  logoutCircle: {
     width: 30,
     height: 30,
     borderRadius: 15,
@@ -1225,7 +1314,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 6,
     borderWidth: 1,
-    borderColor: "#E5E7EB",
+    borderColor: "#FECACA",
   },
   title: {
     fontSize: 28,
@@ -1706,6 +1795,9 @@ const styles = StyleSheet.create({
   },
   logoutIconWrap: {
     backgroundColor: "#FEF2F2",
+  },
+  disabledItem: {
+    opacity: 0.6,
   },
   drawerDivider: {
     height: 1,

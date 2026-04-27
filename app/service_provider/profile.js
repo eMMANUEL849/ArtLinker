@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+
   View,
   Text,
   StyleSheet,
@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { SafeAreaView } from "react-native-safe-area-context";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
 import {
@@ -592,7 +593,7 @@ export default function ServiceProviderProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={["top"]}>
         <View style={styles.centerBox}>
           <ActivityIndicator size="large" color="#4a63ff" />
           <Text style={styles.loadingText}>Loading profile...</Text>
@@ -604,7 +605,7 @@ export default function ServiceProviderProfileScreen() {
   const displayName = profile.businessName || profile.fullName || "Service Provider";
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerCard}>
           <View style={styles.topIconRow}>

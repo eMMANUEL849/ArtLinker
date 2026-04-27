@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+  
   View,
   Text,
   StyleSheet,
@@ -12,6 +12,7 @@ import {
   Alert,
   StatusBar,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
 import { auth, db, storage } from "../../config/firebase";
@@ -19,6 +20,25 @@ import { doc, onSnapshot, setDoc, serverTimestamp } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 
 const DEFAULT_AVATAR = "https://via.placeholder.com/300x300.png?text=Admin";
+
+function getSafeName(user, data) {
+  return (
+    data?.displayName ||
+    data?.name ||
+    user?.displayName ||
+    user?.email?.split("@")[0] ||
+    "Admin"
+  );
+}
+
+function getSafeAvatar(data) {
+  return (
+    data?.photoURL ||
+    data?.avatar ||
+    data?.profileImage ||
+    DEFAULT_AVATAR
+  );
+}
 
 export default function AdminProfileScreen() {
   const currentUser = auth.currentUser;
@@ -36,69 +56,69 @@ export default function AdminProfileScreen() {
     avatar: DEFAULT_AVATAR,
   });
 
+  const hasUser = useMemo(() => Boolean(currentUser?.uid), [currentUser?.uid]);
+
   useEffect(() => {
     if (!currentUser?.uid) {
       setLoading(false);
       return;
     }
 
+    const userRef = doc(db, "users", currentUser.uid);
+
     const unsubscribe = onSnapshot(
-      doc(db, "users", currentUser.uid),
+      userRef,
       async (snapshot) => {
-        if (snapshot.exists()) {
-          const data = snapshot.data();
+        try {
+          if (snapshot.exists()) {
+            const data = snapshot.data();
 
-          setForm({
-            displayName:
-              data?.displayName ||
-              data?.name ||
-              currentUser?.displayName ||
-              "",
-            username: data?.username || "",
-            email: data?.email || currentUser?.email || "",
-            phone: data?.phone || data?.phoneNumber || "",
-            bio: data?.bio || "",
-            avatar:
-              data?.photoURL ||
-              data?.avatar ||
-              data?.profileImage ||
-              DEFAULT_AVATAR,
-          });
-        } else {
-          const starterData = {
-            displayName:
-              currentUser?.displayName ||
-              currentUser?.email?.split("@")[0] ||
-              "Admin",
-            username: "",
-            email: currentUser?.email || "",
-            phone: "",
-            bio: "",
-            avatar: DEFAULT_AVATAR,
-          };
+            setForm({
+              displayName: getSafeName(currentUser, data),
+              username: data?.username || "",
+              email: data?.email || currentUser?.email || "",
+              phone: data?.phone || data?.phoneNumber || "",
+              bio: data?.bio || "",
+              avatar: getSafeAvatar(data),
+            });
+          } else {
+            const starterData = {
+              displayName: getSafeName(currentUser, null),
+              username: "",
+              email: currentUser?.email || "",
+              phone: "",
+              bio: "",
+              avatar: DEFAULT_AVATAR,
+            };
 
-          setForm(starterData);
+            setForm(starterData);
 
-          await setDoc(
-            doc(db, "users", currentUser.uid),
-            {
-              displayName: starterData.displayName,
-              name: starterData.displayName,
-              username: starterData.username,
-              email: starterData.email,
-              phone: starterData.phone,
-              bio: starterData.bio,
-              photoURL: starterData.avatar,
-              avatar: starterData.avatar,
-              role: "admin",
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          );
+            await setDoc(
+              userRef,
+              {
+                displayName: starterData.displayName,
+                name: starterData.displayName,
+                username: starterData.username,
+                email: starterData.email,
+                phone: starterData.phone,
+                phoneNumber: starterData.phone,
+                bio: starterData.bio,
+                photoURL: starterData.avatar,
+                avatar: starterData.avatar,
+                profileImage: starterData.avatar,
+                role: "admin",
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+                updatedBy: currentUser.uid,
+              },
+              { merge: true }
+            );
+          }
+        } catch (error) {
+          console.log("profile snapshot setup error:", error);
+        } finally {
+          setLoading(false);
         }
-
-        setLoading(false);
       },
       (error) => {
         console.log("profile load error:", error);
@@ -160,7 +180,7 @@ export default function AdminProfileScreen() {
 
       const imageRef = ref(
         storage,
-        `admin_profiles/${currentUser.uid}/profile.jpg`
+        `admin_profiles/${currentUser.uid}/profile_${Date.now()}.jpg`
       );
 
       await uploadBytes(imageRef, blob);
@@ -177,7 +197,9 @@ export default function AdminProfileScreen() {
           photoURL: downloadURL,
           avatar: downloadURL,
           profileImage: downloadURL,
+          role: "admin",
           updatedAt: serverTimestamp(),
+          updatedBy: currentUser.uid,
         },
         { merge: true }
       );
@@ -197,7 +219,13 @@ export default function AdminProfileScreen() {
       return;
     }
 
-    if (!form.displayName.trim()) {
+    const cleanedDisplayName = form.displayName.trim();
+    const cleanedUsername = form.username.trim();
+    const cleanedEmail = form.email.trim();
+    const cleanedPhone = form.phone.trim();
+    const cleanedBio = form.bio.trim();
+
+    if (!cleanedDisplayName) {
       Alert.alert("Missing details", "Display name is required.");
       return;
     }
@@ -208,18 +236,19 @@ export default function AdminProfileScreen() {
       await setDoc(
         doc(db, "users", currentUser.uid),
         {
-          displayName: form.displayName.trim(),
-          name: form.displayName.trim(),
-          username: form.username.trim(),
-          email: form.email.trim(),
-          phone: form.phone.trim(),
-          phoneNumber: form.phone.trim(),
-          bio: form.bio.trim(),
-          photoURL: form.avatar,
-          avatar: form.avatar,
-          profileImage: form.avatar,
+          displayName: cleanedDisplayName,
+          name: cleanedDisplayName,
+          username: cleanedUsername,
+          email: cleanedEmail,
+          phone: cleanedPhone,
+          phoneNumber: cleanedPhone,
+          bio: cleanedBio,
+          photoURL: form.avatar || DEFAULT_AVATAR,
+          avatar: form.avatar || DEFAULT_AVATAR,
+          profileImage: form.avatar || DEFAULT_AVATAR,
           role: "admin",
           updatedAt: serverTimestamp(),
+          updatedBy: currentUser.uid,
         },
         { merge: true }
       );
@@ -235,7 +264,7 @@ export default function AdminProfileScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={["top"]}>
         <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
         <View style={styles.loadingWrap}>
           <ActivityIndicator size="large" color="#7C3AED" />
@@ -245,8 +274,23 @@ export default function AdminProfileScreen() {
     );
   }
 
+  if (!hasUser) {
+    return (
+      <SafeAreaView style={styles.safeArea} edges={["top"]}>
+        <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
+        <View style={styles.loadingWrap}>
+          <Ionicons name="alert-circle-outline" size={34} color="#EF4444" />
+          <Text style={styles.loadingTitle}>No admin account found</Text>
+          <Text style={styles.loadingText}>
+            Please sign in again to manage your profile.
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#F8FAFC" />
 
       <ScrollView
@@ -273,7 +317,10 @@ export default function AdminProfileScreen() {
 
         <View style={styles.profileCard}>
           <View style={styles.avatarWrap}>
-            <Image source={{ uri: form.avatar || DEFAULT_AVATAR }} style={styles.avatar} />
+            <Image
+              source={{ uri: form.avatar || DEFAULT_AVATAR }}
+              style={styles.avatar}
+            />
 
             <TouchableOpacity
               style={styles.uploadPhotoButton}
@@ -290,6 +337,16 @@ export default function AdminProfileScreen() {
                 </>
               )}
             </TouchableOpacity>
+          </View>
+
+          <View style={styles.topInfoCard}>
+            <Text style={styles.topInfoName}>
+              {form.displayName || "Admin"}
+            </Text>
+            <Text style={styles.topInfoRole}>Administrator Account</Text>
+            <Text style={styles.topInfoEmail}>
+              {form.email || currentUser?.email || "No email"}
+            </Text>
           </View>
 
           <Text style={styles.fieldLabel}>Display Name</Text>
@@ -379,12 +436,20 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
+    paddingHorizontal: 24,
+  },
+  loadingTitle: {
+    marginTop: 12,
+    fontSize: 17,
+    fontWeight: "800",
+    color: "#111827",
   },
   loadingText: {
-    marginTop: 10,
+    marginTop: 8,
     fontSize: 13,
     color: "#6B7280",
     fontWeight: "600",
+    textAlign: "center",
   },
 
   headerCard: {
@@ -479,6 +544,32 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "800",
     color: "#FFFFFF",
+  },
+
+  topInfoCard: {
+    backgroundColor: "#FAFAFB",
+    borderWidth: 1,
+    borderColor: "#EEF2F7",
+    borderRadius: 16,
+    padding: 14,
+    marginBottom: 8,
+  },
+  topInfoName: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#111827",
+  },
+  topInfoRole: {
+    marginTop: 4,
+    fontSize: 12,
+    fontWeight: "700",
+    color: "#7C3AED",
+  },
+  topInfoEmail: {
+    marginTop: 6,
+    fontSize: 12,
+    color: "#6B7280",
+    fontWeight: "600",
   },
 
   fieldLabel: {

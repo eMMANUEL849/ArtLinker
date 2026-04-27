@@ -1,7 +1,14 @@
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { sendPasswordResetEmail, signInWithEmailAndPassword } from "firebase/auth";
+import * as LocalAuthentication from "expo-local-authentication";
+import * as SecureStore from "expo-secure-store";
+import {
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+} from "firebase/auth";
 import { doc, getDoc, serverTimestamp, updateDoc } from "firebase/firestore";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Image,
@@ -10,7 +17,7 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
+  
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -20,9 +27,14 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
-import { LinearGradient } from "expo-linear-gradient";
+import { SafeAreaView } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
 
 import { auth, db } from "../../config/firebase";
+
+const BIOMETRIC_ENABLED_KEY = "biometric_enabled";
+const BIOMETRIC_EMAIL_KEY = "biometric_email";
+const BIOMETRIC_PASSWORD_KEY = "biometric_password";
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -37,6 +49,22 @@ export default function LoginScreen() {
   const [fpEmail, setFpEmail] = useState("");
   const [fpLoading, setFpLoading] = useState(false);
 
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricEnabled, setBiometricEnabled] = useState(false);
+  const [biometricLoading, setBiometricLoading] = useState(false);
+
+  useEffect(() => {
+    checkBiometricStatus();
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      console.log("AUTH STATE CHANGED:", user ? user.email : "NO USER");
+    });
+
+    return unsubscribe;
+  }, []);
+
   const routeByRole = (role) => {
     if (role === "admin") {
       router.replace("/admin");
@@ -45,6 +73,106 @@ export default function LoginScreen() {
     } else {
       router.replace("/users");
     }
+  };
+
+  const resolveAndRouteUser = async (uid, fallbackEmail = "") => {
+    const userRef = doc(db, "users", uid);
+    const snap = await getDoc(userRef);
+
+    if (!snap.exists()) {
+      throw new Error("Your profile is not set up yet. Please contact admin.");
+    }
+
+    const data = snap.data() || {};
+    const rawRole =
+      typeof data.role === "string" ? data.role.trim().toLowerCase() : "user";
+
+    let userRole = "user";
+
+    if (rawRole === "admin") {
+      userRole = "admin";
+    } else if (
+      rawRole === "service_provider" ||
+      rawRole === "service provider"
+    ) {
+      userRole = "service_provider";
+    }
+
+    await updateDoc(userRef, {
+      email: auth.currentUser?.email || fallbackEmail || data.email || "",
+      lastLoginAt: serverTimestamp(),
+      active: true,
+    });
+
+    routeByRole(userRole);
+  };
+
+  const checkBiometricStatus = async () => {
+    try {
+      const hasHardware = await LocalAuthentication.hasHardwareAsync();
+      const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      const enabled = await SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY);
+      const savedEmail = await SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY);
+      const savedPassword = await SecureStore.getItemAsync(BIOMETRIC_PASSWORD_KEY);
+
+      const available = !!hasHardware && !!isEnrolled;
+      const enabledForUser =
+        enabled === "true" && !!savedEmail && !!savedPassword;
+
+      setBiometricAvailable(available);
+      setBiometricEnabled(enabledForUser);
+
+      if (savedEmail) {
+        setEmail(savedEmail);
+      }
+    } catch (error) {
+      console.log("BIOMETRIC STATUS ERROR:", error?.message);
+      setBiometricAvailable(false);
+      setBiometricEnabled(false);
+    }
+  };
+
+  const saveBiometricPreference = async (userEmail, userPassword) => {
+    try {
+      await SecureStore.setItemAsync(BIOMETRIC_ENABLED_KEY, "true");
+      await SecureStore.setItemAsync(
+        BIOMETRIC_EMAIL_KEY,
+        (userEmail || "").trim().toLowerCase()
+      );
+      await SecureStore.setItemAsync(BIOMETRIC_PASSWORD_KEY, userPassword || "");
+      setBiometricEnabled(true);
+    } catch (error) {
+      console.log("SAVE BIOMETRIC ERROR:", error?.message);
+    }
+  };
+
+  const disableBiometricPreference = async () => {
+    try {
+      await SecureStore.deleteItemAsync(BIOMETRIC_ENABLED_KEY);
+      await SecureStore.deleteItemAsync(BIOMETRIC_EMAIL_KEY);
+      await SecureStore.deleteItemAsync(BIOMETRIC_PASSWORD_KEY);
+      setBiometricEnabled(false);
+    } catch (error) {
+      console.log("DISABLE BIOMETRIC ERROR:", error?.message);
+    }
+  };
+
+  const askToEnableBiometric = async (userEmail, userPassword) => {
+    if (!biometricAvailable) return;
+
+    Alert.alert(
+      "Enable fingerprint login",
+      "Would you like to use fingerprint next time on this device?",
+      [
+        { text: "Not now", style: "cancel" },
+        {
+          text: "Enable",
+          onPress: async () => {
+            await saveBiometricPreference(userEmail, userPassword);
+          },
+        },
+      ]
+    );
   };
 
   const onLogin = async () => {
@@ -64,36 +192,11 @@ export default function LoginScreen() {
       const cred = await signInWithEmailAndPassword(auth, em, pw);
       const uid = cred.user.uid;
 
-      const userRef = doc(db, "users", uid);
-      const snap = await getDoc(userRef);
+      await resolveAndRouteUser(uid, em);
 
-      if (!snap.exists()) {
-        setLoginError("Your profile is not set up yet. Please contact admin.");
-        return;
-      }
-
-      const data = snap.data() || {};
-      const rawRole =
-        typeof data.role === "string" ? data.role.trim().toLowerCase() : "user";
-
-      let userRole = "user";
-
-      if (rawRole === "admin") {
-        userRole = "admin";
-      } else if (
-        rawRole === "service_provider" ||
-        rawRole === "service provider"
-      ) {
-        userRole = "service_provider";
-      }
-
-      await updateDoc(userRef, {
-        email: cred.user.email || em,
-        lastLoginAt: serverTimestamp(),
-        active: true,
-      });
-
-      routeByRole(userRole);
+      setTimeout(() => {
+        askToEnableBiometric(em, pw);
+      }, 300);
     } catch (e) {
       console.log("AUTH ERROR:", e?.code, e?.message);
 
@@ -113,6 +216,66 @@ export default function LoginScreen() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onBiometricLogin = async () => {
+    setLoginError("");
+    setBiometricLoading(true);
+
+    try {
+      const enabled = await SecureStore.getItemAsync(BIOMETRIC_ENABLED_KEY);
+      const savedEmail = await SecureStore.getItemAsync(BIOMETRIC_EMAIL_KEY);
+      const savedPassword = await SecureStore.getItemAsync(BIOMETRIC_PASSWORD_KEY);
+
+      if (enabled !== "true" || !savedEmail || !savedPassword) {
+        Alert.alert(
+          "Fingerprint not enabled",
+          "Please sign in with your email and password first."
+        );
+        return;
+      }
+
+      const result = await LocalAuthentication.authenticateAsync({
+        promptMessage: "Login with fingerprint",
+        fallbackLabel: "Use passcode",
+        disableDeviceFallback: false,
+        cancelLabel: "Cancel",
+      });
+
+      if (!result.success) {
+        if (result.error !== "user_cancel" && result.error !== "system_cancel") {
+          Alert.alert("Authentication failed", "Fingerprint was not verified.");
+        }
+        return;
+      }
+
+      setEmail(savedEmail);
+
+      const cred = await signInWithEmailAndPassword(
+        auth,
+        savedEmail,
+        savedPassword
+      );
+
+      await resolveAndRouteUser(cred.user.uid, savedEmail);
+    } catch (error) {
+      console.log("BIOMETRIC LOGIN ERROR:", error?.code, error?.message);
+
+      if (
+        error?.code === "auth/invalid-credential" ||
+        error?.code === "auth/wrong-password"
+      ) {
+        Alert.alert(
+          "Fingerprint login failed",
+          "Your saved login details are no longer valid. Please sign in with your email and password again."
+        );
+        await disableBiometricPreference();
+      } else {
+        Alert.alert("Error", error?.message || "Fingerprint login failed.");
+      }
+    } finally {
+      setBiometricLoading(false);
     }
   };
 
@@ -158,7 +321,7 @@ export default function LoginScreen() {
   const subtitleSize = Math.max(13, Math.min(width * 0.036, 15));
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
       <StatusBar barStyle="light-content" />
 
       <LinearGradient
@@ -254,7 +417,9 @@ export default function LoginScreen() {
                       />
                     </View>
 
-                    {!!loginError && <Text style={styles.inlineError}>{loginError}</Text>}
+                    {!!loginError && (
+                      <Text style={styles.inlineError}>{loginError}</Text>
+                    )}
 
                     <Pressable onPress={openForgot} style={styles.forgotWrap}>
                       <Text style={styles.forgotText}>Forgot password?</Text>
@@ -269,6 +434,40 @@ export default function LoginScreen() {
                         {loading ? "Signing in..." : "Login"}
                       </Text>
                     </Pressable>
+
+                    {biometricAvailable && biometricEnabled && (
+                      <Pressable
+                        style={[
+                          styles.biometricButton,
+                          biometricLoading && styles.buttonDisabled,
+                        ]}
+                        onPress={onBiometricLogin}
+                        disabled={biometricLoading}
+                      >
+                        <Ionicons name="finger-print" size={22} color="#14B8A6" />
+                        <Text style={styles.biometricButtonText}>
+                          {biometricLoading
+                            ? "Checking fingerprint..."
+                            : "Login with fingerprint"}
+                        </Text>
+                      </Pressable>
+                    )}
+
+                    {biometricAvailable && biometricEnabled && (
+                      <Pressable
+                        onPress={async () => {
+                          await disableBiometricPreference();
+                          Alert.alert(
+                            "Fingerprint disabled",
+                            "Fingerprint login has been turned off for this device."
+                          );
+                        }}
+                      >
+                        <Text style={styles.disableBiometricText}>
+                          Turn off fingerprint login
+                        </Text>
+                      </Pressable>
+                    )}
 
                     <Pressable onPress={() => router.push("/auth/register")}>
                       <Text style={styles.footerText}>
@@ -452,6 +651,29 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     marginTop: 4,
+  },
+  biometricButton: {
+    minHeight: 54,
+    borderRadius: 18,
+    borderWidth: 1.5,
+    borderColor: "rgba(45,212,191,0.45)",
+    backgroundColor: "rgba(255,255,255,0.04)",
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: 10,
+  },
+  biometricButtonText: {
+    color: "#D1FAE5",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+  disableBiometricText: {
+    marginTop: 2,
+    textAlign: "center",
+    color: "#94A3B8",
+    fontWeight: "700",
+    fontSize: 13,
   },
   buttonDisabled: {
     opacity: 0.7,

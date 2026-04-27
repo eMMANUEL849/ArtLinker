@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
-  SafeAreaView,
+
   View,
   Text,
   StyleSheet,
@@ -15,6 +15,7 @@ import {
   Share,
 } from "react-native";
 import { Ionicons, MaterialIcons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { onAuthStateChanged } from "firebase/auth";
 import {
   addDoc,
@@ -622,7 +623,7 @@ export default function ExploreScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.safeArea} edges={["top"]}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
       <ScrollView
